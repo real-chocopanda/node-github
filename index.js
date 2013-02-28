@@ -616,8 +616,7 @@ var Client = module.exports = function(config) {
 
         var headers = {
             "host": host,
-            "user-agent": "NodeJS HTTP Client",
-            "content-length": "0"
+            "user-agent": "NodeJS HTTP Client"
         };
 
         if (this.auth) {
