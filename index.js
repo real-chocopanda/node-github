@@ -3,6 +3,7 @@
 var error = require("./error");
 var Util = require("./util");
 var Url = require("url");
+var request = require("request");
 
 /** section: github
  * class Client
@@ -596,6 +597,7 @@ var Client = module.exports = function(config) {
      *  Send an HTTP request to the server and pass the result to a callback.
      **/
     this.httpSend = function(msg, block, callback) {
+        var self = this;
         var method = block.method.toLowerCase();
         var hasBody = ("head|get|delete".indexOf(method) === -1);
         var format = hasBody && this.constants.requestFormat
@@ -603,34 +605,21 @@ var Client = module.exports = function(config) {
             : "query";
         var obj = getQueryAndUrl(msg, block, format);
         var query = obj.query;
-        var url = this.config.url ? this.config.url + obj.url : obj.url;
 
+        var url = this.config.url ? this.config.url + obj.url : obj.url;
         var path = (!hasBody && query.length)
             ? url + "?" + query.join("&")
             : url;
         var protocol = this.config.protocol || this.constants.protocol || "http";
         var host = this.config.host || this.constants.host;
         var port = this.config.port || this.constants.port || (protocol == "https" ? 443 : 80);
-        if (this.config.proxy) {
-            host = this.config.proxy.host;
-            port = this.config.proxy.port || 3128;
-        }
 
         var headers = {
             "host": host,
             "user-agent": "NodeJS HTTP Client",
             "content-length": "0"
         };
-        if (hasBody) {
-            if (format == "json")
-                query = JSON.stringify(query);
-            else
-                query = query.join("&");
-            headers["content-length"] = query.length;
-            headers["content-type"] = format == "json"
-                ? "application/json"
-                : "application/x-www-form-urlencoded";
-        }
+
         if (this.auth) {
             var basic;
             switch (this.auth.type) {
@@ -651,55 +640,57 @@ var Client = module.exports = function(config) {
             }
         }
 
-        var options = {
-            host: host,
-            port: port,
-            path: path,
-            method: method,
-            headers: headers
+        var req = {
+            'encoding': 'utf8',
+            'method': method,
+            'headers': headers,
+            'url': protocol + '://' + host + path,
+            'port': port
         };
 
-        if (this.debug)
-            console.log("REQUEST: ", options);
-
-        var self = this;
-        var req = require(protocol).request(options, function(res) {
-            if (self.debug) {
-                console.log("STATUS: " + res.statusCode);
-                console.log("HEADERS: " + JSON.stringify(res.headers));
-            }
-            res.setEncoding("utf8");
-            var data = "";
-            res.on("data", function(chunk) {
-                data += chunk;
-            });
-            res.on("end", function() {
-                if (res.statusCode >= 400 && res.statusCode < 600 || res.statusCode < 10) {
-                    callback(new error.HttpError(data, res.statusCode));
-                }
-                else {
-                    res.data = data;
-                    callback(null, res);
-                }
-            });
-        });
+        if (this.config.proxy) {
+            req.proxy = this.config.proxy.host + ':' + this.config.proxy.port;
+        }
 
         if (this.config.timeout) {
-            req.setTimeout(this.config.timeout);
+            req.timeout = this.config.timeout;
         }
 
-        req.on("error", function(e) {
-            if (self.debug)
-                console.log("problem with request: " + e.message);
-            callback(e.message);
-        });
-
-        // write data to request body
         if (hasBody && query.length) {
-            if (self.debug)
-                console.log("REQUEST BODY: " + query + "\n");
-            req.write(query + "\n");
+            req.body = query;
         }
-        req.end();
+
+        if (hasBody) {
+            if (format == "json") {
+                req.json = query;
+                req.headers["content-type"] = "application/json";
+            }
+            else {
+                query = query.join("&");
+                req.body = query;
+                req.headers["content-type"] = "application/x-www-form-urlencoded";
+                req.headers["content-length"] = query.length;
+            }
+        }
+
+        if (this.debug)
+            console.log("REQUEST: ", req);
+
+        request(req, function (err, response, body) {
+            if (self.debug) {
+                console.log("STATUS: " + response.statusCode);
+                console.log("HEADERS: " + JSON.stringify(response.headers));
+            }
+            if (err) {
+                callback(err);
+            }
+            else if (response.statusCode >= 400 && response.statusCode < 600 || response.statusCode < 10) {
+                callback(new error.HttpError(body, response.statusCode));
+            }
+            else {
+                response.data = body;
+                callback(null, response);
+            }
+        });
     };
 }).call(Client.prototype);
