@@ -687,6 +687,11 @@ var Client = module.exports = function(config) {
                 callback(new error.HttpError(body, response.statusCode));
             }
             else {
+                // some methods expects string for body, no auto json conversion by request lib
+                if (format == "json") {
+                    body = JSON.stringify(body);
+                }
+                
                 response.data = body;
                 callback(null, response);
             }
